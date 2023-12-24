@@ -1,0 +1,101 @@
+-- 1-3 Число потоков
+-- 1-3 Такта обработка запроса
+-- 5 Длина очереди
+-- 5-8 Максимальное кол-во кдиентов
+-- Если клиент не обслуживается довольно долго, то происходит ошибка времени ожидания, если сервер не может обслужить клиента, то он может сразу отказать в обслуживании. 
+-- Необходимо разработать алгоритм обработки клиентских запросов, при котором у клиентов не случается ошибка времени ожидания, все клиенты справедливо получают обслуживание и т.п. 
+-- Для сравнения необходимо разработать вторую процедуру, которая не обеспечивает эти свойства. 
+
+MODULE main
+VAR
+	states : array -1 .. testClientCount - 1 of { NOT_CREATED, NEW, PROCESSING, PROCESSED, TIMEOUT, CANCELLED };
+	queue : array 0 .. queueMaxSize - 1 of -1 .. testClientCount - 1;
+	thRemains : 0 .. 3;
+	thClient : -1 .. testClientCount - 1;
+	
+	c0 : process Client(0, queueMaxSize, testClientCount, states, queue, thRemains, thClient);
+	c1 : process Client(1, queueMaxSize, testClientCount, states, queue, thRemains, thClient);
+	c2 : process Client(2, queueMaxSize, testClientCount, states, queue, thRemains, thClient);
+	c3 : process Client(3, queueMaxSize, testClientCount, states, queue, thRemains, thClient);
+	c4 : process Client(4, queueMaxSize, testClientCount, states, queue, thRemains, thClient);
+DEFINE
+	queueMaxSize := 2;
+	testClientCount := 5;
+	
+ASSIGN
+	init(queue[0]) := -1;
+    init(queue[1]) := -1;
+	init(states[-1]) := NOT_CREATED;
+	init(thRemains) := 0;
+	init(thClient) := -1;
+
+
+CTLSPEC 
+	AG
+	(
+		(states[0] = NEW -> EF (states[0] = PROCESSED | states[0] = CANCELLED)) &
+		(states[1] = NEW -> EF (states[1] = PROCESSED | states[1] = CANCELLED)) &
+		(states[2] = NEW -> EF (states[2] = PROCESSED | states[2] = CANCELLED)) &
+		(states[3] = NEW -> EF (states[3] = PROCESSED | states[3] = CANCELLED)) &
+		(states[4] = NEW -> EF (states[4] = PROCESSED | states[4] = CANCELLED)) 
+	);
+	
+CTLSPEC 
+	AG
+	(
+		(states[0] != NOT_CREATED -> (states[0] != TIMEOUT)) & 
+		(states[1] != NOT_CREATED -> (states[1] != TIMEOUT)) & 
+		(states[2] != NOT_CREATED -> (states[2] != TIMEOUT)) & 
+		(states[3] != NOT_CREATED -> (states[3] != TIMEOUT)) & 
+		(states[4] != NOT_CREATED -> (states[4] != TIMEOUT)) 
+	);
+
+-- клиент со статусом
+MODULE Client(i, queueSize, testClientCount, states, queue, thRemains, thClient)
+DEFINE
+	state := states[i];
+	
+	isQ0Free := (queue[0] = -1);
+	isQ1Free := (queue[1] = -1) | (queue[1] = queue[0]);
+	isClientInQueue := (queue[0] = i) | (queue[1] = i);
+ASSIGN
+	init(states[i]) := NOT_CREATED;
+	
+	next(states[i]) :=
+		case
+			(state = NOT_CREATED) : { NEW };
+			(state = NEW) & !isQ0Free & !isQ1Free & !isClientInQueue : { CANCELLED };
+			(state = NEW) & (queue[0] = i) : { PROCESSING };
+			(state = PROCESSING) & !isClientInQueue : { PROCESSED };
+			TRUE : state;
+		esac;
+	
+	next(queue[0]) :=
+		case
+			(queue[0] = -1) : queue[1];
+			(queue[0] = thClient) & (thRemains = 0) : -1;
+			TRUE : queue[0];
+		esac;
+	
+	next(queue[1]) :=
+		case
+			(queue[1] = -1) & (state = NEW): i;
+			(queue[1] = -1) | (queue[1] = queue[0]) : -1;
+			TRUE : queue[1];
+		esac;	
+
+	next(thClient) :=
+		case
+			(thClient = -1) : queue[0];
+			(thRemains = 0) : -1;
+			TRUE : thClient;
+		esac;
+
+
+	next(thRemains) :=
+		case
+			(thRemains > 0) & (states[thClient] = PROCESSING) : thRemains - 1;
+			(thRemains = 0) & (thClient != -1) & (states[thClient] = NEW) : {1, 2, 3};
+			TRUE : thRemains;
+		esac;
+		
